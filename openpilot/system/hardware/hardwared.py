@@ -40,19 +40,22 @@ PANDA_STATES_TIMEOUT = round(1000 / SERVICE_LIST['pandaStates'].frequency * 1.5)
 ONROAD_CYCLE_TIME = 1  # seconds to wait offroad after requesting an onroad cycle
 
 
-def update_dashcam_active(params, cable_connected: bool, ignition: bool, prev: bool) -> bool:
-  """Publish DashcamActive on a USB/ignition edge, and heal a cleared or stale value.
+def update_dashcam_active(params, cable_connected: bool, ignition: bool, prev: bool,
+                          in_car: bool = True) -> bool:
+  """Activate the dashcam whenever the car is off and the device is on external power.
 
-  DashcamActive is CLEAR_ON_MANAGER_START, so the manager can wipe it after the last
-  physical edge, leaving the dashcam view inactive while USB power is still present.
-  Re-publish whenever the stored value does not match the current physical state.
+  The comma 3X USB-C port is not fully standards-compliant: many cables/chargers
+  report typec_cc_orientation == 0 even while plugged in, so cable_connected()
+  alone misses a real USB power source. A device that is running with no panda
+  harness (not in_car) is necessarily on external power, so treat that as USB
+  power too. In-car harness power with ignition off stays stock to protect the
+  battery. Re-publish whenever the stored param disagrees so a manager-start
+  clear cannot leave the dashcam view inactive.
   """
-  active = cable_connected and not ignition
+  active = not ignition and (cable_connected or not in_car)
   if active != prev or params.get_bool("DashcamActive") != active:
     params.put_bool("DashcamActive", active, block=True)
   return active
-
-
 class Chestnut:
   # flash before going onroad, modeld ignores chestnut until the product string matches
   MAX_ATTEMPTS = 3
@@ -331,7 +334,7 @@ def hardware_thread(end_event, hw_queue) -> None:
     set_usb_state(msg.deviceState, last_hw_state.usb_state)
 
     dashcam_active_prev = update_dashcam_active(params, msg.deviceState.usbState.connected,
-                                                onroad_conditions["ignition"], dashcam_active_prev)
+                                                onroad_conditions["ignition"], dashcam_active_prev, in_car)
 
     chestnut.update(started_ts is None, last_hw_state.usb_state)
     chestnut_state = sm["chestnutState"]
