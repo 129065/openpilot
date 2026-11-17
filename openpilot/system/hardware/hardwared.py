@@ -56,6 +56,22 @@ def update_dashcam_active(params, cable_connected: bool, ignition: bool, prev: b
   if active != prev or params.get_bool("DashcamActive") != active:
     params.put_bool("DashcamActive", active, block=True)
   return active
+
+
+def dashcam_fan_load(ignition: bool, dashcam_active: bool) -> bool:
+  """Dashcam records all 3 cameras at Max bitrate with ignition off — a full onroad-level
+  load. Tell the fan controller it is loaded so the fan is not capped at 30% (which
+  caused thermal shutdown on a desk with no car airflow)."""
+  return ignition or dashcam_active
+
+
+def dashcam_needs_emergency_cooling(dashcam_active: bool, device_temp_good: bool) -> bool:
+  """Force 100% fan on critical temp even with ignition off. Upstream's 100% override
+  is gated by show_alert, which requires ignition, so it never fires in dashcam mode.
+  We keep the on-screen alert ignition-gated to leave the dashcam view clean."""
+  return dashcam_active and not device_temp_good
+
+
 class Chestnut:
   # flash before going onroad, modeld ignores chestnut until the product string matches
   MAX_ATTEMPTS = 3
@@ -355,7 +371,8 @@ def hardware_thread(end_event, hw_queue) -> None:
     all_comp_temp = all_temp_filter.update(max(temp_sources))
     msg.deviceState.maxTempC = all_comp_temp
 
-    msg.deviceState.fanSpeedPercentDesired = fan_controller.update(all_comp_temp, onroad_conditions["ignition"])
+    fan_load = dashcam_fan_load(onroad_conditions["ignition"], dashcam_active_prev)
+    msg.deviceState.fanSpeedPercentDesired = fan_controller.update(all_comp_temp, fan_load)
 
     is_offroad_for_5_min = (started_ts is None) and ((not started_seen) or (off_ts is None) or (time.monotonic() - off_ts > 60 * 5))
     if is_offroad_for_5_min and offroad_comp_temp > OFFROAD_DANGER_TEMP:
@@ -394,6 +411,11 @@ def hardware_thread(end_event, hw_queue) -> None:
     set_offroad_alert_if_changed("Offroad_TemperatureTooHigh", show_alert, extra_text=extra_text)
 
     if show_alert:
+      msg.deviceState.fanSpeedPercentDesired = 100
+
+    # Dashcam mode runs hot with ignition off; cool at full force if we hit critical
+    # temp even though the (ignition-gated) on-screen alert never fires.
+    if dashcam_needs_emergency_cooling(dashcam_active_prev, onroad_conditions["device_temp_good"]):
       msg.deviceState.fanSpeedPercentDesired = 100
 
     # *** registration check ***
