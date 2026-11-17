@@ -41,9 +41,14 @@ ONROAD_CYCLE_TIME = 1  # seconds to wait offroad after requesting an onroad cycl
 
 
 def update_dashcam_active(params, cable_connected: bool, ignition: bool, prev: bool) -> bool:
-  """Publish DashcamActive only when USB power/car ignition changes."""
+  """Publish DashcamActive on a USB/ignition edge, and heal a cleared or stale value.
+
+  DashcamActive is CLEAR_ON_MANAGER_START, so the manager can wipe it after the last
+  physical edge, leaving the dashcam view inactive while USB power is still present.
+  Re-publish whenever the stored value does not match the current physical state.
+  """
   active = cable_connected and not ignition
-  if active != prev:
+  if active != prev or params.get_bool("DashcamActive") != active:
     params.put_bool("DashcamActive", active, block=True)
   return active
 
