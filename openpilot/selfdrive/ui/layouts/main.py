@@ -80,6 +80,12 @@ class MainLayout(Widget):
       self._set_mode_for_state()
 
   def _set_mode_for_state(self):
+    # Dashcam mode overrides everything, including body/home layouts.
+    if ui_state.dashcam_active:
+      self._sidebar.set_visible(False)
+      self._set_current_layout(MainState.ONROAD)
+      return
+
     # Don't go onroad if body, home is onroad
     if ui_state.is_body:
       self._set_current_layout(MainState.HOME)
