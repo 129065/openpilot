@@ -64,6 +64,7 @@ class DashcamView(CameraView):
     self._last_upload_check = 0.0
     self._upload_state = ("DRIVE", SOFT_WHITE)
     self._signin_rect: rl.Rectangle | None = None
+    self._last_release_pos = None  # touch release that triggered the click callback
 
   # ---- state -------------------------------------------------------------
   def _is_recording(self) -> bool:
@@ -194,15 +195,25 @@ class DashcamView(CameraView):
     self._text(self._font_medium, storage_text, right - sw, y + 44, 42, SOFT_WHITE)
     self._signin_rect = None if drive_text != "DRIVE: SIGN IN" else rl.Rectangle(right - dw, y - 6, dw, 50)
 
+  def _handle_mouse_release(self, mouse_pos, /):
+    # Widget fires the click callback on release, and it does so via this method.
+    # Remember the release position BEFORE calling super() so the callback below
+    # (open_signin_if_tapped) can tell whether the Drive status was tapped.
+    # Scanning gui_app.mouse_events for left_pressed does not work here: the
+    # press frame is already gone by the time a release callback runs.
+    self._last_release_pos = mouse_pos
+    super()._handle_mouse_release(mouse_pos)
+
   def open_signin_if_tapped(self) -> bool:
     """Allow sign-in without SSH by tapping the Drive status in the dashcam view."""
-    if self._signin_rect is None or os.path.exists(TOKEN_PATH):
+    pos = self._last_release_pos
+    self._last_release_pos = None  # consume: one release -> at most one action
+    if self._signin_rect is None or pos is None or os.path.exists(TOKEN_PATH):
       return False
-    for ev in gui_app.mouse_events:
-      if ev.left_pressed and rl.check_collision_point_rec(rl.Vector2(ev.pos.x, ev.pos.y), self._signin_rect):
-        from openpilot.selfdrive.ui.onroad.dashcam_signin import DashcamSignIn
-        DashcamSignIn()
-        return True
+    if rl.check_collision_point_rec(rl.Vector2(pos.x, pos.y), self._signin_rect):
+      from openpilot.selfdrive.ui.onroad.dashcam_signin import DashcamSignIn
+      DashcamSignIn()
+      return True
     return False
 
   def _draw_attention_icon(self, cx: float, cy: float):
